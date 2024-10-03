@@ -10,6 +10,7 @@ import { BaseQuery } from '../adapter';
 const FunctionRegex = /function\s+\w+\(([A-Za-z0-9_,]*)|\(([\s\S]*?)\)\s*=>|\(?(\w+)\)?\s*=>/;
 const CONTEXT_SYMBOLS = {
   SECURITY_CONTEXT: 'securityContext',
+  security_context: 'securityContext',
   FILTER_PARAMS: 'filterParams',
   FILTER_GROUP: 'filterGroup',
   SQL_UTILS: 'sqlUtils'
@@ -139,6 +140,7 @@ export class CubeSymbols {
     this.camelCaseTypes(cube.dimensions);
     this.camelCaseTypes(cube.segments);
     this.camelCaseTypes(cube.preAggregations);
+    this.camelCaseTypes(cube.accessPolicy);
 
     if (cube.preAggregations) {
       this.transformPreAggregations(cube.preAggregations);
@@ -146,6 +148,10 @@ export class CubeSymbols {
 
     if (this.evaluateViews) {
       this.prepareIncludes(cube, errorReporter, splitViews);
+    }
+
+    if (cube.accessPolicy) {
+      this.prepareAccessPolicy(cube, errorReporter);
     }
 
     return Object.assign(
@@ -209,6 +215,60 @@ export class CubeSymbols {
     for (const index of Object.values(indexes)) {
       if (!index.type) {
         index.type = 'regular';
+      }
+    }
+  }
+
+  /**
+   * @protected
+   */
+  allMembersOrList(cube, specifier) {
+    const types = ['measures', 'dimensions'];
+    if (specifier === '*') {
+      const allMembers = R.unnest(types.map(type => Object.keys(cube[type] || {})));
+      return allMembers;
+    } else {
+      return specifier || [];
+    }
+  }
+
+  /**
+   * @protected
+   */
+  prepareAccessPolicy(cube, errorReporter) {
+    for (const policy of cube.accessPolicy) {
+      for (const filter of policy?.rowLevel?.filters || []) {
+        filter.memberReference = this.evaluateReferences(cube, filter.member);
+        if (filter.memberReference.indexOf('.') !== -1) {
+          errorReporter.error(
+            `Paths aren't allowed in security policy filters but '${filter.memberReference}' provided as member for ${cube.name}`
+          );
+        }
+        filter.memberReference = this.pathFromArray([cube.name, filter.memberReference]);
+      }
+
+      if (policy.memberLevel) {
+        const memberMapper = (member) => {
+          if (member.indexOf('.') !== -1) {
+            errorReporter.error(
+              `Paths aren't allowed in memberLevel policy but '${member}' provided as a member for ${cube.name}`
+            );
+          }
+          return this.pathFromArray([cube.name, member]);
+        };
+
+        // TODO(maxim): is this even a correct way to figure out if includes is not set?
+        // const resolvedIncludes = this.resolveSymbol(policy.memberLevel.includes);
+        // if (!resolvedIncludes) {
+        //   errorReporter.error(`${cube.name} memberLevel.includes must be defined or set to "*"`);
+        //   return;
+        // }
+
+        const evaluatedIncludes = this.evaluateReferences(cube, policy.memberLevel.includes);
+        const evaluatedExcludes = this.evaluateReferences(cube, policy.memberLevel.excludes);
+
+        policy.memberLevel.includesMembers = this.allMembersOrList(cube, evaluatedIncludes).map(memberMapper);
+        policy.memberLevel.excludesMembers = this.allMembersOrList(cube, evaluatedExcludes).map(memberMapper);
       }
     }
   }
@@ -406,6 +466,27 @@ export class CubeSymbols {
     });
   }
 
+  // Used to evaluate access policies to allow referencing security_context at query time
+  evaluateContextFunction(cube, contextFn, context = {}) {
+    const cubeEvaluator = this;
+
+    const res = cubeEvaluator.resolveSymbolsCall(contextFn, (name) => {
+      const resolvedSymbol = this.resolveSymbol(cube, name);
+      if (resolvedSymbol) {
+        return resolvedSymbol;
+      }
+      throw new UserError(
+        `Cube references are not allowed when evaluating RLS conditions or filters. Found: ${name} in ${cube.name}`
+      );
+    }, {
+      contextSymbols: {
+        securityContext: context.securityContext,
+      }
+    });
+
+    return res;
+  }
+
   evaluateReferences(cube, referencesFn, options = {}) {
     const cubeEvaluator = this;
 
@@ -458,6 +539,10 @@ export class CubeSymbols {
         res = res.fn.apply(null, res.memberNames.map((id) => nameResolver(id.trim())));
       }
       return res;
+    } catch (e) {
+      // TODO(maxim): should we keep this log?
+      console.log('Error while resolving Cube symbols: ', e);
+      console.error(e);
     } finally {
       this.resolveSymbolsCallContext = oldContext;
     }

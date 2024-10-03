@@ -105,6 +105,7 @@ export class CubeToMetaTransformer {
           })),
           R.toPairs
         )(cube.segments || {}),
+        accessPolicy: cube.accessPolicy || [],
         hierarchies: cube.hierarchies || []
       },
     };

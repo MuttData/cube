@@ -348,4 +348,39 @@ describe('Yaml Schema Testing', () => {
       await compiler.compile();
     });
   });
+  describe('Access policy: ', () => {
+    it('defines a correct accessPolicy', async () => {
+      const { compiler } = prepareYamlCompiler(
+        `
+        cubes:
+        - name: Orders
+          sql: "select * from tbl"
+          dimensions:
+            - name: created_at
+              sql: created_at
+              type: time
+            - name: status
+              sql: status
+              type: string
+          measures:
+            - name: count
+              type: count
+          accessPolicy:
+            - role: admin
+              conditions:
+                - if: "{ !security_context.isBlocked }"
+              rowLevel:
+                filters:
+                  - member: status
+                    operator: equals
+                    values: ["completed"]
+              memberLevel:
+                includes:
+                  - status
+        `
+      );
+
+      await compiler.compile();
+    });
+  });
 });

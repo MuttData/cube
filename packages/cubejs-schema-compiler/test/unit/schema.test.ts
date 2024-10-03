@@ -1,5 +1,5 @@
 import { prepareCompiler } from './PrepareCompiler';
-import { createCubeSchema, createCubeSchemaWithCustomGranularities } from './utils';
+import { createCubeSchema, createCubeSchemaWithCustomGranularities, createCubeSchemaWithAccessPolicy } from './utils';
 
 describe('Schema Testing', () => {
   const schemaCompile = async () => {
@@ -366,5 +366,38 @@ describe('Schema Testing', () => {
       CubeC: { relationship: 'hasMany' },
       CubeD: { relationship: 'belongsTo' }
     });
+  });
+
+  it('valid schema with accessPolicy', async () => {
+    const { compiler, metaTransformer } = prepareCompiler([
+      createCubeSchemaWithAccessPolicy('ProtectedCube'),
+    ]);
+    await compiler.compile();
+    compiler.throwIfAnyErrors();
+
+    // TODO(maxim): this should be further validated
+    expect(metaTransformer.cubes[0].config.accessPolicy).toBeDefined();
+  });
+
+  it('memberLevel accessPolicy should require explicit includes', async () => {
+    const logger = jest.fn();
+    const { compiler } = prepareCompiler([
+      createCubeSchemaWithAccessPolicy('ProtectedCube', `
+          {
+            role: 'manager2',
+            memberLevel: {
+              // ommitted includes
+              excludes: [\`min\`, \`max\`]
+            },
+          },
+      `),
+    ]);
+    await compiler.compile();
+    compiler.throwIfAnyErrors();
+
+    expect(logger.mock.calls.length).toEqual(1);
+    expect(logger.mock.calls[0]).toEqual([
+      'ProtectedCube memberLevel.includes must be defined or set to "*"'
+    ]);
   });
 });
