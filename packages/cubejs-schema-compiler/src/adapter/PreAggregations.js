@@ -314,7 +314,7 @@ export class PreAggregations {
         dateRange: td.dateRange,
         granularity: td.granularity,
       });
-    }).map(d => query.newTimeDimension(d));
+    });
 
     let sortedAllCubeNames;
     let sortedUsedCubePrimaryKeys;
@@ -373,7 +373,7 @@ export class PreAggregations {
       );
 
     const isAdditive = R.all(m => m.isAdditive(), query.measures);
-    const hasPostAggregate = R.any(m => m.isPostAggregate(), query.measures);
+    const hasMultiStage = R.any(m => m.isMultiStage(), query.measures);
     const leafMeasures = leafMeasurePaths.map(path => query.newMeasure(path));
     const leafMeasureAdditive = R.all(m => m.isAdditive(), leafMeasures);
     const cumulativeMeasures = leafMeasures
@@ -416,7 +416,7 @@ export class PreAggregations {
       ungrouped: query.ungrouped,
       sortedUsedCubePrimaryKeys,
       sortedAllCubeNames,
-      hasPostAggregate
+      hasMultiStage
     };
   }
 
@@ -431,7 +431,11 @@ export class PreAggregations {
   static sortTimeDimensionsWithRollupGranularity(timeDimensions) {
     return timeDimensions && R.sortBy(
       R.prop(0),
-      timeDimensions.map(d => [d.expressionPath(), d.rollupGranularity()])
+      timeDimensions.map(d => (d.isPredefinedGranularity() ?
+        [d.expressionPath(), d.rollupGranularity(), null] :
+        // For custom granularities we need to add its name to the list (for exact matches)
+        [d.expressionPath(), d.rollupGranularity(), d.granularity]
+      ))
     ) || [];
   }
 
@@ -548,7 +552,8 @@ export class PreAggregations {
         backAlias(references.sortedTimeDimensions || sortTimeDimensions(references.timeDimensions));
       const qryTimeDimensions = references.allowNonStrictDateRangeMatch
         ? transformedQuery.timeDimensions
-        : transformedQuery.sortedTimeDimensions;
+        : transformedQuery.sortedTimeDimensions.map(t => t.slice(0, 2));
+      // slice above is used to exclude possible custom granularity returned from sortTimeDimensionsWithRollupGranularity()
 
       const backAliasMeasures = backAlias(references.measures);
       const backAliasSortedDimensions = backAlias(references.sortedDimensions || references.dimensions);
@@ -615,9 +620,16 @@ export class PreAggregations {
      * @returns {Array<Array<string>>}
      */
     const expandTimeDimension = (timeDimension) => {
-      const [dimension, granularity] = timeDimension;
-      return expandGranularity(granularity)
+      const [dimension, granularity, customGranularity] = timeDimension;
+      const res = expandGranularity(granularity)
         .map((newGranularity) => [dimension, newGranularity]);
+
+      if (customGranularity) {
+        // For custom granularities we add it upfront to the list (for exact matches)
+        res.unshift([dimension, customGranularity]);
+      }
+
+      return res;
     };
 
     /**
@@ -695,7 +707,7 @@ export class PreAggregations {
      */
     const canUseFn =
       (
-        transformedQuery.leafMeasureAdditive && !transformedQuery.hasMultipliedMeasures && !transformedQuery.hasPostAggregate || transformedQuery.ungrouped
+        transformedQuery.leafMeasureAdditive && !transformedQuery.hasMultipliedMeasures && !transformedQuery.hasMultiStage || transformedQuery.ungrouped
       ) ? (r) => canUsePreAggregationLeafMeasureAdditive(r) ||
           canUsePreAggregationNotAdditive(r)
         : canUsePreAggregationNotAdditive;
@@ -782,7 +794,7 @@ export class PreAggregations {
   }
 
   /**
-   * Returns an array of potencially applicable for the query preaggs in the
+   * Returns an array of potentially applicable for the query preaggs in the
    * same order they appear in the schema file.
    * @returns {Array<Object>}
    */
