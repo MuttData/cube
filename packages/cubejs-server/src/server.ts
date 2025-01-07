@@ -115,6 +115,8 @@ export class CubejsServer {
       }
 
       const PORT = getEnv('port');
+      this.server.keepAliveTimeout = parseInt(process.env.CUBEJS_SERVER_KEEP_ALIVE_TIMEOUT || '5000')
+      this.server.headersTimeout = parseInt(process.env.CUBEJS_SERVER_HEADERS_TIMEOUT || '60000')
       await this.server.listen(PORT);
 
       return {
