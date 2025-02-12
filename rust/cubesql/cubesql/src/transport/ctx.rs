@@ -234,6 +234,8 @@ mod tests {
                 measures: vec![],
                 segments: vec![],
                 joins: None,
+                folders: None,
+                hierarchies: None,
                 meta: None,
             },
             CubeMeta {
@@ -245,6 +247,8 @@ mod tests {
                 measures: vec![],
                 segments: vec![],
                 joins: None,
+                folders: None,
+                hierarchies: None,
                 meta: None,
             },
         ];

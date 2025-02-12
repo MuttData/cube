@@ -311,7 +311,7 @@ impl AsyncPostgresShim {
     fn is_semifast_shutdownable(&self) -> bool {
         return self.cursors.is_empty()
             && self.portals.is_empty()
-            && Self::session_state_is_semifast_shutdownable(&*self.session.state);
+            && Self::session_state_is_semifast_shutdownable(&self.session.state);
     }
 
     fn admin_shutdown_error() -> ConnectionError {
@@ -401,7 +401,7 @@ impl AsyncPostgresShim {
                             .log_load_state(
                                 span_id.clone(),
                                 auth_context,
-                                self.session.state.get_load_request_meta(),
+                                self.session.state.get_load_request_meta("sql"),
                                 "Load Request".to_string(),
                                 serde_json::json!({
                                     "query": span_id.as_ref().unwrap().query_key.clone(),
@@ -453,7 +453,7 @@ impl AsyncPostgresShim {
                                     .log_load_state(
                                         Some(span_id.clone()),
                                         auth_context,
-                                        self.session.state.get_load_request_meta(),
+                                        self.session.state.get_load_request_meta("sql"),
                                         "Data Query Status".to_string(),
                                         serde_json::json!({
                                             "isDataQuery": true
@@ -481,7 +481,7 @@ impl AsyncPostgresShim {
                                     .log_load_state(
                                         Some(span_id.clone()),
                                         auth_context.clone(),
-                                        self.session.state.get_load_request_meta(),
+                                        self.session.state.get_load_request_meta("sql"),
                                         "Data Query Status".to_string(),
                                         serde_json::json!({
                                             "isDataQuery": true,
@@ -496,7 +496,7 @@ impl AsyncPostgresShim {
                                     .log_load_state(
                                         Some(span_id.clone()),
                                         auth_context,
-                                        self.session.state.get_load_request_meta(),
+                                        self.session.state.get_load_request_meta("sql"),
                                         "Load Request Success".to_string(),
                                         serde_json::json!({
                                             "query": span_id.query_key.clone(),
@@ -602,7 +602,7 @@ impl AsyncPostgresShim {
                     .log_load_state(
                         Some(span_id.clone()),
                         auth_context,
-                        self.session.state.get_load_request_meta(),
+                        self.session.state.get_load_request_meta("sql"),
                         "SQL API Error".to_string(),
                         serde_json::json!({
                             "query": span_id.query_key.clone(),
@@ -1336,7 +1336,7 @@ impl AsyncPostgresShim {
                 .await?;
             }
             Statement::Rollback { .. } => {
-                if self.end_transaction()? == false {
+                if !self.end_transaction()? {
                     // PostgreSQL returns command completion anyway
                     self.write(protocol::NoticeResponse::warning(
                         ErrorCode::NoActiveSqlTransaction,
@@ -1355,7 +1355,7 @@ impl AsyncPostgresShim {
                 .await?;
             }
             Statement::Commit { .. } => {
-                if self.end_transaction()? == false {
+                if !self.end_transaction()? {
                     // PostgreSQL returns command completion anyway
                     self.write(protocol::NoticeResponse::warning(
                         ErrorCode::NoActiveSqlTransaction,
@@ -1645,17 +1645,10 @@ impl AsyncPostgresShim {
             Statement::Close { cursor } => {
                 let plan = match cursor {
                     CloseCursor::All => {
-                        let mut portals_to_remove = Vec::new();
-
-                        for (key, _) in &self.cursors {
-                            portals_to_remove.push(key.clone());
+                        for key in self.cursors.keys() {
+                            self.portals.remove(key);
                         }
-
-                        self.cursors = HashMap::new();
-
-                        for key in portals_to_remove {
-                            self.portals.remove(&key);
-                        }
+                        self.cursors.clear();
 
                         Ok(QueryPlan::MetaOk(
                             StatusFlags::empty(),
@@ -1855,7 +1848,7 @@ impl AsyncPostgresShim {
                 .log_load_state(
                     span_id.clone(),
                     auth_context,
-                    self.session.state.get_load_request_meta(),
+                    self.session.state.get_load_request_meta("sql"),
                     "Load Request".to_string(),
                     serde_json::json!({
                         "query": {
@@ -1883,7 +1876,7 @@ impl AsyncPostgresShim {
                         .log_load_state(
                             Some(span_id.clone()),
                             auth_context,
-                            self.session.state.get_load_request_meta(),
+                            self.session.state.get_load_request_meta("sql"),
                             "Load Request Success".to_string(),
                             serde_json::json!({
                                 "query": {

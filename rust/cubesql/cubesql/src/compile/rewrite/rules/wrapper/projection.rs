@@ -1,16 +1,17 @@
 use crate::{
     compile::rewrite::{
-        cube_scan_wrapper, projection,
+        cube_scan_wrapper, projection, rewrite,
         rewriter::{CubeEGraph, CubeRewrite},
         rules::wrapper::WrapperRules,
         subquery, transforming_rewrite, wrapped_select, wrapped_select_aggr_expr_empty_tail,
         wrapped_select_filter_expr_empty_tail, wrapped_select_group_expr_empty_tail,
         wrapped_select_having_expr_empty_tail, wrapped_select_joins_empty_tail,
-        wrapped_select_order_expr_empty_tail, wrapped_select_subqueries_empty_tail,
-        wrapped_select_window_expr_empty_tail, wrapper_pullup_replacer, wrapper_pushdown_replacer,
-        ListType, LogicalPlanLanguage, ProjectionAlias, WrappedSelectAlias,
-        WrappedSelectPushToCube, WrappedSelectUngroupedScan, WrapperPullupReplacerPushToCube,
-        WrapperPushdownReplacerPushToCube,
+        wrapped_select_order_expr_empty_tail, wrapped_select_projection_expr_empty_tail,
+        wrapped_select_subqueries_empty_tail, wrapped_select_window_expr_empty_tail,
+        wrapper_pullup_replacer, wrapper_pushdown_replacer, wrapper_replacer_context, ListType,
+        LogicalPlanLanguage, ProjectionAlias, WrappedSelectAlias, WrappedSelectPushToCube,
+        WrappedSelectUngroupedScan, WrapperReplacerContextPushToCube,
+        WrapperReplacerContextUngroupedScan,
     },
     copy_flag, var, var_iter,
 };
@@ -25,10 +26,14 @@ impl WrapperRules {
                 cube_scan_wrapper(
                     wrapper_pullup_replacer(
                         "?cube_scan_input",
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "?in_projection",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "?in_projection",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     "CubeScanWrapperFinalized:false",
                 ),
@@ -40,63 +45,105 @@ impl WrapperRules {
                     "WrappedSelectSelectType:Projection",
                     wrapper_pushdown_replacer(
                         "?expr",
-                        "?alias_to_cube",
-                        "?pushdown_push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_subqueries_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_group_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_aggr_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_window_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         "?cube_scan_input",
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
-                    wrapped_select_joins_empty_tail(),
+                    wrapper_pullup_replacer(
+                        wrapped_select_joins_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
+                    ),
                     wrapper_pullup_replacer(
                         wrapped_select_filter_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapped_select_having_expr_empty_tail(),
                     "WrappedSelectLimit:None",
                     "WrappedSelectOffset:None",
                     wrapper_pullup_replacer(
                         wrapped_select_order_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     "?select_alias",
                     "WrappedSelectDistinct:false",
@@ -109,7 +156,7 @@ impl WrapperRules {
                 "?expr",
                 "?projection_alias",
                 "?push_to_cube",
-                "?pushdown_push_to_cube",
+                "?ungrouped_scan",
                 "?select_alias",
                 "?select_push_to_cube",
                 "?select_ungrouped_scan",
@@ -142,10 +189,14 @@ impl WrapperRules {
                     cube_scan_wrapper(
                         wrapper_pullup_replacer(
                             "?cube_scan_input",
-                            "?alias_to_cube",
-                            "?push_to_cube",
-                            "?in_projection",
-                            "?cube_members",
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "?push_to_cube",
+                                "?in_projection",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
                         ),
                         "CubeScanWrapperFinalized:false",
                     ),
@@ -160,63 +211,105 @@ impl WrapperRules {
                     "WrappedSelectSelectType:Projection",
                     wrapper_pushdown_replacer(
                         "?expr",
-                        "?alias_to_cube",
-                        "?pushdown_push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pushdown_replacer(
                         "?subqueries",
-                        "?alias_to_cube",
-                        "?pushdown_push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_group_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_aggr_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         wrapped_select_window_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapper_pullup_replacer(
                         "?cube_scan_input",
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
-                    wrapped_select_joins_empty_tail(),
+                    wrapper_pullup_replacer(
+                        wrapped_select_joins_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
+                    ),
                     wrapper_pullup_replacer(
                         wrapped_select_filter_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     wrapped_select_having_expr_empty_tail(),
                     "WrappedSelectLimit:None",
                     "WrappedSelectOffset:None",
                     wrapper_pullup_replacer(
                         wrapped_select_order_expr_empty_tail(),
-                        "?alias_to_cube",
-                        "?push_to_cube",
-                        "WrapperPullupReplacerInProjection:true",
-                        "?cube_members",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "?push_to_cube",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "?ungrouped_scan",
+                        ),
                     ),
                     "?select_alias",
                     "WrappedSelectDistinct:false",
@@ -230,19 +323,261 @@ impl WrapperRules {
                 "?expr",
                 "?projection_alias",
                 "?push_to_cube",
-                "?pushdown_push_to_cube",
+                "?ungrouped_scan",
                 "?select_alias",
                 "?select_push_to_cube",
                 "?select_ungrouped_scan",
             ),
         )]);
     }
+
+    pub fn projection_merge_rules(&self, rules: &mut Vec<CubeRewrite>) {
+        rules.extend(vec![rewrite(
+            "wrapper-merge-projection-with-inner-wrapped-select",
+            // Input is not a finished wrapper_pullup_replacer, but WrappedSelect just before pullup
+            // After pullup replacer would disable push to cube, because any node on top would have WrappedSelect in `from`
+            // So there would be no CubeScan to push to
+            // Instead, this rule tries to catch `from` before pulling up, and merge outer Filter into inner WrappedSelect
+            projection(
+                "?projection_expr",
+                cube_scan_wrapper(
+                    wrapped_select(
+                        "WrappedSelectSelectType:Projection",
+                        wrapper_pullup_replacer(
+                            wrapped_select_projection_expr_empty_tail(),
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            wrapped_select_subqueries_empty_tail(),
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            wrapped_select_group_expr_empty_tail(),
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            wrapped_select_aggr_expr_empty_tail(),
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            wrapped_select_window_expr_empty_tail(),
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            "?inner_from",
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            "?inner_joins",
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapper_pullup_replacer(
+                            "?inner_filter",
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        wrapped_select_having_expr_empty_tail(),
+                        // Inner must not have limit and offset, because they are not commutative with aggregation
+                        "WrappedSelectLimit:None",
+                        "WrappedSelectOffset:None",
+                        wrapper_pullup_replacer(
+                            wrapped_select_order_expr_empty_tail(),
+                            wrapper_replacer_context(
+                                "?alias_to_cube",
+                                "WrapperReplacerContextPushToCube:true",
+                                "WrapperReplacerContextInProjection:false",
+                                "?cube_members",
+                                "?grouped_subqueries",
+                                "?ungrouped_scan",
+                            ),
+                        ),
+                        "WrappedSelectAlias:None",
+                        "WrappedSelectDistinct:false",
+                        "WrappedSelectPushToCube:true",
+                        "WrappedSelectUngroupedScan:true",
+                    ),
+                    "CubeScanWrapperFinalized:false",
+                ),
+                // TODO support merging projection with aliases
+                "ProjectionAlias:None",
+                "ProjectionSplit:false",
+            ),
+            cube_scan_wrapper(
+                wrapped_select(
+                    "WrappedSelectSelectType:Projection",
+                    wrapper_pushdown_replacer(
+                        "?projection_expr",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        wrapped_select_subqueries_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        wrapped_select_group_expr_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        wrapped_select_aggr_expr_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        wrapped_select_window_expr_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        "?inner_from",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        "?inner_joins",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapper_pullup_replacer(
+                        "?inner_filter",
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    wrapped_select_having_expr_empty_tail(),
+                    "WrappedSelectLimit:None",
+                    "WrappedSelectOffset:None",
+                    wrapper_pullup_replacer(
+                        wrapped_select_order_expr_empty_tail(),
+                        wrapper_replacer_context(
+                            "?alias_to_cube",
+                            "WrapperReplacerContextPushToCube:true",
+                            "WrapperReplacerContextInProjection:true",
+                            "?cube_members",
+                            "?grouped_subqueries",
+                            "WrapperReplacerContextUngroupedScan:true",
+                        ),
+                    ),
+                    "WrappedSelectAlias:None",
+                    "WrappedSelectDistinct:false",
+                    "WrappedSelectPushToCube:true",
+                    "WrappedSelectUngroupedScan:true",
+                ),
+                "CubeScanWrapperFinalized:false",
+            ),
+        )]);
+    }
+
     fn transform_projection(
         &self,
         expr_var: &'static str,
         projection_alias_var: &'static str,
         push_to_cube_var: &'static str,
-        pushdown_push_to_cube_var: &'static str,
+        ungrouped_scan_var: &'static str,
         select_alias_var: &'static str,
         select_push_to_cube_var: &'static str,
         select_ungrouped_scan_var: &'static str,
@@ -250,7 +585,7 @@ impl WrapperRules {
         let expr_var = var!(expr_var);
         let projection_alias_var = var!(projection_alias_var);
         let push_to_cube_var = var!(push_to_cube_var);
-        let pushdown_push_to_cube_var = var!(pushdown_push_to_cube_var);
+        let ungrouped_scan_var = var!(ungrouped_scan_var);
         let select_alias_var = var!(select_alias_var);
         let select_push_to_cube_var = var!(select_push_to_cube_var);
         let select_ungrouped_scan_var = var!(select_ungrouped_scan_var);
@@ -261,7 +596,7 @@ impl WrapperRules {
                 expr_var,
                 projection_alias_var,
                 push_to_cube_var,
-                pushdown_push_to_cube_var,
+                ungrouped_scan_var,
                 select_alias_var,
                 select_push_to_cube_var,
                 select_ungrouped_scan_var,
@@ -275,7 +610,7 @@ impl WrapperRules {
         expr_var: &'static str,
         projection_alias_var: &'static str,
         push_to_cube_var: &'static str,
-        pushdown_push_to_cube_var: &'static str,
+        ungrouped_scan_var: &'static str,
         select_alias_var: &'static str,
         select_push_to_cube_var: &'static str,
         select_ungrouped_scan_var: &'static str,
@@ -284,7 +619,7 @@ impl WrapperRules {
         let expr_var = var!(expr_var);
         let projection_alias_var = var!(projection_alias_var);
         let push_to_cube_var = var!(push_to_cube_var);
-        let pushdown_push_to_cube_var = var!(pushdown_push_to_cube_var);
+        let ungrouped_scan_var = var!(ungrouped_scan_var);
         let select_alias_var = var!(select_alias_var);
         let select_push_to_cube_var = var!(select_push_to_cube_var);
         let select_ungrouped_scan_var = var!(select_ungrouped_scan_var);
@@ -302,7 +637,7 @@ impl WrapperRules {
                     expr_var,
                     projection_alias_var,
                     push_to_cube_var,
-                    pushdown_push_to_cube_var,
+                    ungrouped_scan_var,
                     select_alias_var,
                     select_push_to_cube_var,
                     select_ungrouped_scan_var,
@@ -319,7 +654,7 @@ impl WrapperRules {
         expr_var: Var,
         projection_alias_var: Var,
         push_to_cube_var: Var,
-        pushdown_push_to_cube_var: Var,
+        ungrouped_scan_var: Var,
         select_alias_var: Var,
         select_push_to_cube_var: Var,
         select_ungrouped_scan_var: Var,
@@ -329,9 +664,20 @@ impl WrapperRules {
                 egraph,
                 subst,
                 push_to_cube_var,
-                WrapperPullupReplacerPushToCube,
-                pushdown_push_to_cube_var,
-                WrapperPushdownReplacerPushToCube
+                WrapperReplacerContextPushToCube,
+                select_push_to_cube_var,
+                WrappedSelectPushToCube
+            ) {
+                return false;
+            }
+
+            if !copy_flag!(
+                egraph,
+                subst,
+                ungrouped_scan_var,
+                WrapperReplacerContextUngroupedScan,
+                select_ungrouped_scan_var,
+                WrappedSelectUngroupedScan
             ) {
                 return false;
             }
@@ -339,32 +685,13 @@ impl WrapperRules {
             for projection_alias in
                 var_iter!(egraph[subst[projection_alias_var]], ProjectionAlias).cloned()
             {
-                for push_to_cube in var_iter!(
-                    egraph[subst[push_to_cube_var]],
-                    WrapperPullupReplacerPushToCube
-                )
-                .cloned()
-                {
-                    subst.insert(
-                        select_push_to_cube_var,
-                        egraph.add(LogicalPlanLanguage::WrappedSelectPushToCube(
-                            WrappedSelectPushToCube(push_to_cube),
-                        )),
-                    );
-                    subst.insert(
-                        select_ungrouped_scan_var,
-                        egraph.add(LogicalPlanLanguage::WrappedSelectUngroupedScan(
-                            WrappedSelectUngroupedScan(push_to_cube),
-                        )),
-                    );
-                    subst.insert(
-                        select_alias_var,
-                        egraph.add(LogicalPlanLanguage::WrappedSelectAlias(WrappedSelectAlias(
-                            projection_alias,
-                        ))),
-                    );
-                    return true;
-                }
+                subst.insert(
+                    select_alias_var,
+                    egraph.add(LogicalPlanLanguage::WrappedSelectAlias(WrappedSelectAlias(
+                        projection_alias,
+                    ))),
+                );
+                return true;
             }
         }
 

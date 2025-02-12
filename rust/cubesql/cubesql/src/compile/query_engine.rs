@@ -104,7 +104,7 @@ pub trait QueryEngine {
                     .log_load_state(
                         Some(span_id.clone()),
                         auth_context,
-                        state.get_load_request_meta(),
+                        state.get_load_request_meta("sql"),
                         "SQL API Query Planning".to_string(),
                         serde_json::json!({
                             "query": span_id.query_key.clone(),
@@ -286,7 +286,7 @@ pub trait QueryEngine {
                     .log_load_state(
                         Some(span_id.clone()),
                         auth_context,
-                        state.get_load_request_meta(),
+                        state.get_load_request_meta("sql"),
                         "SQL API Query Planning Success".to_string(),
                         serde_json::json!({
                             "query": span_id.query_key.clone(),
@@ -298,9 +298,11 @@ pub trait QueryEngine {
             }
         }
 
+        // We want to generate SQL early, as a part of planning, and not later (like during execution)
+        // to catch all SQL generation errors during planning
         let rewrite_plan = Self::evaluate_wrapped_sql(
             self.transport_ref().clone(),
-            Arc::new(state.get_load_request_meta()),
+            Arc::new(state.get_load_request_meta("sql")),
             rewrite_plan,
         )
         .await?;
@@ -388,7 +390,7 @@ impl QueryEngine for SqlQueryEngine {
     ) -> Result<DFSessionContext, CompilationError> {
         let query_planner = Arc::new(CubeQueryPlanner::new(
             self.transport_ref().clone(),
-            state.get_load_request_meta(),
+            state.get_load_request_meta("sql"),
             self.config_ref().clone(),
         ));
         let mut ctx = DFSessionContext::with_state(
@@ -465,7 +467,9 @@ impl QueryEngine for SqlQueryEngine {
         ctx.register_udf(create_current_timestamp_udf("localtimestamp"));
         ctx.register_udf(create_current_schema_udf());
         ctx.register_udf(create_current_schemas_udf());
+        ctx.register_udf(create_format_udf());
         ctx.register_udf(create_format_type_udf());
+        ctx.register_udf(create_col_description_udf());
         ctx.register_udf(create_pg_datetime_precision_udf());
         ctx.register_udf(create_pg_numeric_precision_udf());
         ctx.register_udf(create_pg_numeric_scale_udf());

@@ -26,6 +26,7 @@ import { BaseTimeDimension } from './BaseTimeDimension';
 import { ParamAllocator } from './ParamAllocator';
 import { PreAggregations } from './PreAggregations';
 import { SqlParser } from '../parser/SqlParser';
+import { Granularity } from './Granularity';
 
 const DEFAULT_PREAGGREGATIONS_SCHEMA = 'stb_pre_aggregations';
 
@@ -58,6 +59,23 @@ const SecondsDurations = {
  * @property {import('../compiler/JoinGraph').JoinGraph} joinGraph
  * @property {import('../compiler/CompilerCache').CompilerCache} compilerCache
  * @property {*} headCommitId
+ */
+
+/**
+ * @typedef {Object} JoinRoot
+ * @property {string} sql
+ * @property {string} alias
+ */
+
+/**
+ * @typedef {Object} JoinItem
+ * @property {string} sql
+ * @property {string} alias
+ * @property {string} on
+ */
+
+/**
+ * @typedef {[JoinRoot, ...JoinItem]} JoinChain
  */
 
 /**
@@ -224,6 +242,7 @@ export class BaseQuery {
       multiStageQuery: this.options.multiStageQuery,
       multiStageDimensions: this.options.multiStageDimensions,
       multiStageTimeDimensions: this.options.multiStageTimeDimensions,
+      subqueryJoins: this.options.subqueryJoins,
     });
     this.from = this.options.from;
     this.multiStageQuery = this.options.multiStageQuery;
@@ -268,6 +287,11 @@ export class BaseQuery {
     this.cubeAliasPrefix = this.options.cubeAliasPrefix;
     this.preAggregationsSchemaOption = this.options.preAggregationsSchema ?? DEFAULT_PREAGGREGATIONS_SCHEMA;
     this.externalQueryClass = this.options.externalQueryClass;
+
+    /**
+     * @type {Array<{sql: string, on: {expression: Function}, joinType: 'LEFT' | 'INNER', alias: string}>}
+     */
+    this.customSubQueryJoins = this.options.subqueryJoins ?? [];
 
     // Set the default order only when options.order is not provided at all
     // if options.order is set (empty array [] or with data) - use it as is
@@ -631,7 +655,17 @@ export class BaseQuery {
       ungrouped: this.options.ungrouped
 
     };
-    const res = nativeBuildSqlAndParams(queryParams);
+    const buildResult = nativeBuildSqlAndParams(queryParams);
+
+    if (buildResult.error) {
+      if (buildResult.error.cause && buildResult.error.cause === 'User') {
+        throw new UserError(buildResult.error.message);
+      } else {
+        throw new Error(buildResult.error.message);
+      }
+    }
+
+    const res = buildResult.result;
     // FIXME
     res[1] = [...res[1]];
     return res;
@@ -1356,7 +1390,47 @@ export class BaseQuery {
   }
 
   granularityHierarchies() {
-    return R.fromPairs(Object.keys(standardGranularitiesParents).map(k => [k, this.granularityParentHierarchy(k)]));
+    return this.cacheValue(
+      // If time dimension custom granularity in data model is defined without
+      // timezone information they are treated in query timezone.
+      // Because of that it's not possible to correctly precalculate
+      // granularities hierarchies on startup as they are specific for each timezone.
+      ['granularityHierarchies', this.timezone],
+      () => R.reduce(
+        (hierarchies, cube) => R.reduce(
+          (acc, [tdName, td]) => {
+            const dimensionKey = `${cube}.${tdName}`;
+
+            // constructing standard granularities for time dimension
+            const standardEntries = R.fromPairs(
+              R.keys(standardGranularitiesParents).map(gr => [
+                `${dimensionKey}.${gr}`,
+                standardGranularitiesParents[gr],
+              ]),
+            );
+
+            // If we have custom granularities in time dimension
+            const customEntries = td.granularities
+              ? R.fromPairs(
+                R.keys(td.granularities).map(granularityName => {
+                  const grObj = new Granularity(this, { dimension: dimensionKey, granularity: granularityName });
+                  return [
+                    `${dimensionKey}.${granularityName}`,
+                    [granularityName, ...standardGranularitiesParents[grObj.minGranularity()]],
+                  ];
+                }),
+              )
+              : {};
+
+            return { ...acc, ...standardEntries, ...customEntries };
+          },
+          hierarchies,
+          R.toPairs(this.cubeEvaluator.timeDimensionsForCube(cube)),
+        ),
+        {},
+        R.keys(this.cubeEvaluator.evaluatedCubes),
+      ),
+    );
   }
 
   granularityParentHierarchy(granularity) {
@@ -1604,19 +1678,45 @@ export class BaseQuery {
     return this.joinSql([
       { sql: cubeSql, alias: cubeAlias },
       ...(subQueryDimensionsByCube[join.root] || []).map(d => this.subQueryJoin(d)),
-      ...joins
+      ...joins,
+      ...this.customSubQueryJoins.map((customJoin) => this.customSubQueryJoin(customJoin)),
     ]);
   }
 
   joinSql(toJoin) {
     const [root, ...rest] = toJoin;
     const joins = rest.map(
-      j => `LEFT JOIN ${j.sql} ${this.asSyntaxJoin} ${j.alias} ON ${j.on}`
+      j => {
+        const joinType = j.joinType ?? 'LEFT';
+        return `${joinType} JOIN ${j.sql} ${this.asSyntaxJoin} ${j.alias} ON ${j.on}`;
+      }
     );
 
     return [`${root.sql} ${this.asSyntaxJoin} ${root.alias}`, ...joins].join('\n');
   }
 
+  /**
+   *
+   * @param {{sql: string, on: {cubeName: string, expression: Function}, joinType: 'LEFT' | 'INNER', alias: string}}
+   *   customJoin
+   * @returns {JoinItem}
+   */
+  customSubQueryJoin(customJoin) {
+    const on = this.evaluateSql(customJoin.on.cubeName, customJoin.on.expression);
+
+    return {
+      sql: `(${customJoin.sql})`,
+      alias: customJoin.alias,
+      on,
+      joinType: customJoin.joinType,
+    };
+  }
+
+  /**
+   *
+   * @param {string} dimension
+   * @returns {JoinItem}
+   */
   subQueryJoin(dimension) {
     const { prefix, subQuery, cubeName } = this.subQueryDescription(dimension);
     const primaryKeys = this.cubeEvaluator.primaryKeys[cubeName];
@@ -2770,10 +2870,6 @@ export class BaseQuery {
     return this.join && this.join.multiplicationFactor[cubeName];
   }
 
-  inIntegrationTimeZone(date) {
-    return moment.tz(date, this.timezone);
-  }
-
   inDbTimeZone(date) {
     return inDbTimeZone(this.timezone, this.timestampFormat(), date);
   }
@@ -3283,11 +3379,12 @@ export class BaseQuery {
         column_aliased: '{{expr}} {{quoted_alias}}',
         query_aliased: '{{ query }} AS {{ quoted_alias }}',
         case: 'CASE{% if expr %} {{ expr }}{% endif %}{% for when, then in when_then %} WHEN {{ when }} THEN {{ then }}{% endfor %}{% if else_expr %} ELSE {{ else_expr }}{% endif %} END',
-        is_null: '{{ expr }} IS {% if negate %}NOT {% endif %}NULL',
+        is_null: '({{ expr }} IS {% if negate %}NOT {% endif %}NULL)',
         binary: '({{ left }} {{ op }} {{ right }})',
         sort: '{{ expr }} {% if asc %}ASC{% else %}DESC{% endif %} NULLS {% if nulls_first %}FIRST{% else %}LAST{% endif %}',
         order_by: '{% if index %} {{ index }} {% else %} {{ expr }} {% endif %} {% if asc %}ASC{% else %}DESC{% endif %}{% if nulls_first %} NULLS FIRST{% endif %}',
         cast: 'CAST({{ expr }} AS {{ data_type }})',
+        cast_to_string: 'CAST({{ expr }} AS TEXT)',
         window_function: '{{ fun_call }} OVER ({% if partition_by_concat %}PARTITION BY {{ partition_by_concat }}{% if order_by_concat or window_frame %} {% endif %}{% endif %}{% if order_by_concat %}ORDER BY {{ order_by_concat }}{% if window_frame %} {% endif %}{% endif %}{% if window_frame %}{{ window_frame }}{% endif %})',
         window_frame_bounds: '{{ frame_type }} BETWEEN {{ frame_start }} AND {{ frame_end }}',
         in_list: '{{ expr }} {% if negated %}NOT {% endif %}IN ({{ in_exprs_concat }})',
@@ -3304,6 +3401,7 @@ export class BaseQuery {
         like: '{{ expr }} {% if negated %}NOT {% endif %}LIKE {{ pattern }}',
         ilike: '{{ expr }} {% if negated %}NOT {% endif %}ILIKE {{ pattern }}',
         like_escape: '{{ like_expr }} ESCAPE {{ escape_char }}',
+        concat_strings: '{{ strings | join(\' || \' ) }}',
       },
       filters: {
         equals: '{{ column }} = {{ value }}{{ is_null_check }}',
@@ -3757,6 +3855,12 @@ export class BaseQuery {
 
   securityContextForRust() {
     return this.contextSymbolsProxy(this.contextSymbols.securityContext);
+  }
+
+  sqlUtilsForRust() {
+    return {
+      convertTz: this.convertTz.bind(this)
+    };
   }
 
   contextSymbolsProxy(symbols) {

@@ -213,19 +213,21 @@ export class CubeEvaluator extends CubeSymbols {
     return [];
   }
 
-  private prepareHierarchies(cube: any, errorReporter: ErrorReporter) {
+  private prepareHierarchies(cube: any, errorReporter: ErrorReporter): void {
     const uniqueHierarchyNames = new Set();
-    if (Array.isArray(cube.hierarchies)) {
-      cube.hierarchies = cube.hierarchies.map(hierarchy => {
-        if (uniqueHierarchyNames.has(hierarchy.name)) {
-          errorReporter.error(`Duplicate hierarchy name '${hierarchy.name}' in cube '${cube.name}'`);
+    if (Object.keys(cube.hierarchies).length) {
+      cube.evaluatedHierarchies = Object.entries(cube.hierarchies).map(([name, hierarchy]) => {
+        if (uniqueHierarchyNames.has(name)) {
+          errorReporter.error(`Duplicate hierarchy name '${name}' in cube '${cube.name}'`);
         }
-        uniqueHierarchyNames.add(hierarchy.name);
+        uniqueHierarchyNames.add(name);
 
         return ({
-          ...hierarchy,
+          name,
+          ...(typeof hierarchy === 'object' ? hierarchy : {}),
           levels: this.evaluateReferences(
             cube.name,
+            // @ts-ignore
             hierarchy.levels,
             { originalSorting: true }
           )
@@ -239,7 +241,8 @@ export class CubeEvaluator extends CubeSymbols {
       const includedHierarchyNames = cube.includedMembers.filter(it => it.type === 'hierarchies').map(it => it.memberPath.split('.')[1]);
 
       for (const cubeName of includedCubeNames) {
-        const { hierarchies } = this.evaluatedCubes[cubeName] || {};
+        // As views come after cubes in the list, we can safely assume that cube is already evaluated
+        const { evaluatedHierarchies: hierarchies } = this.evaluatedCubes[cubeName] || {};
 
         if (Array.isArray(hierarchies) && hierarchies.length) {
           const filteredHierarchies = hierarchies
@@ -264,11 +267,11 @@ export class CubeEvaluator extends CubeSymbols {
             })
             .filter(it => it.levels.length);
 
-          cube.hierarchies = [...(cube.hierarchies || []), ...filteredHierarchies];
+          cube.evaluatedHierarchies = [...(cube.evaluatedHierarchies || []), ...filteredHierarchies];
         }
       }
 
-      cube.hierarchies = (cube.hierarchies || []).map((hierarchy) => ({
+      cube.evaluatedHierarchies = (cube.evaluatedHierarchies || []).map((hierarchy) => ({
         ...hierarchy,
         levels: hierarchy.levels.map((level) => {
           const member = cube.includedMembers.find(m => m.memberPath === level);
@@ -281,8 +284,6 @@ export class CubeEvaluator extends CubeSymbols {
         }).filter(Boolean)
       }));
     }
-
-    return [];
   }
 
   private evaluateMultiStageReferences(cubeName: string, obj: { [key: string]: MeasureDefinition }) {
@@ -447,8 +448,8 @@ export class CubeEvaluator extends CubeSymbols {
 
   public timeDimensionPathsForCube(cube: any) {
     return R.compose(
-      R.map(nameToDefinition => `${cube}.${nameToDefinition[0]}`),
-      R.toPairs,
+      R.map(dimName => `${cube}.${dimName}`),
+      R.keys,
       // @ts-ignore
       R.filter((d: any) => d.type === 'time')
       // @ts-ignore
@@ -459,12 +460,19 @@ export class CubeEvaluator extends CubeSymbols {
     return this.cubeFromPath(cube).measures || {};
   }
 
+  public timeDimensionsForCube(cube) {
+    return R.filter(
+      (d: any) => d.type === 'time',
+      this.cubeFromPath(cube).dimensions || {}
+    );
+  }
+
   public preAggregationsForCube(path: string) {
     return this.cubeFromPath(path).preAggregations || {};
   }
 
   /**
-   * Returns pre-aggregations filtered by the spcified selector.
+   * Returns pre-aggregations filtered by the specified selector.
    * @param {{
    *  scheduled: boolean,
    *  dataSource: Array<string>,

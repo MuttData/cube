@@ -8,7 +8,7 @@ import { camelizeCube } from './utils';
 import { BaseQuery } from '../adapter';
 
 const FunctionRegex = /function\s+\w+\(([A-Za-z0-9_,]*)|\(([\s\S]*?)\)\s*=>|\(?(\w+)\)?\s*=>/;
-const CONTEXT_SYMBOLS = {
+export const CONTEXT_SYMBOLS = {
   SECURITY_CONTEXT: 'securityContext',
   // SECURITY_CONTEXT has been deprecated, however security_context (lowecase)
   // is allowed in RBAC policies for query-time attribute matching
@@ -19,7 +19,7 @@ const CONTEXT_SYMBOLS = {
   SQL_UTILS: 'sqlUtils'
 };
 
-const CURRENT_CUBE_CONSTANTS = ['CUBE', 'TABLE'];
+export const CURRENT_CUBE_CONSTANTS = ['CUBE', 'TABLE'];
 
 export class CubeSymbols {
   constructor(evaluateViews) {
@@ -65,6 +65,7 @@ export class CubeSymbols {
     let measures;
     let dimensions;
     let segments;
+    let hierarchies;
 
     const cubeObject = Object.assign({
       allDefinitions(type) {
@@ -74,7 +75,6 @@ export class CubeSymbols {
             ...cubeDefinition[type]
           };
         } else {
-          // TODO We probably do not need this shallow copy
           return { ...cubeDefinition[type] };
         }
       },
@@ -107,7 +107,18 @@ export class CubeSymbols {
       set segments(v) {
         // Dont allow to modify
       },
-    }, cubeDefinition);
+
+      get hierarchies() {
+        if (!hierarchies) {
+          hierarchies = this.allDefinitions('hierarchies');
+        }
+        return hierarchies;
+      },
+      set hierarchies(v) {
+        //
+      }
+    },
+    cubeDefinition);
 
     if (cubeDefinition.extends) {
       const superCube = this.resolveSymbolsCall(cubeDefinition.extends, (name) => this.cubeReferenceProxy(name));
@@ -131,7 +142,8 @@ export class CubeSymbols {
       R.unnest,
       R.map(R.toPairs),
       R.filter(v => !!v)
-    )([cube.measures, cube.dimensions, cube.segments, cube.preAggregations]);
+    )([cube.measures, cube.dimensions, cube.segments, cube.preAggregations, cube.hierarchies]);
+
     if (duplicateNames.length > 0) {
       errorReporter.error(`${duplicateNames.join(', ')} defined more than once`);
     }
@@ -597,7 +609,11 @@ export class CubeSymbols {
     return Object.assign({
       filterParams: this.filtersProxyDep(),
       filterGroup: this.filterGroupFunctionDep(),
-      securityContext: BaseQuery.contextSymbolsProxyFrom({}, (param) => param)
+      securityContext: BaseQuery.contextSymbolsProxyFrom({}, (param) => param),
+      sqlUtils: {
+        convertTz: (f) => f
+
+      },
     });
   }
 

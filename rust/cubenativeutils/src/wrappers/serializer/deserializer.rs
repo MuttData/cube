@@ -1,13 +1,14 @@
 use super::error::NativeObjSerializerError;
-use crate::wrappers::inner_types::InnerTypes;
-use crate::wrappers::object::{
-    NativeArray, NativeBoolean, NativeNumber, NativeString, NativeStruct,
+use crate::wrappers::{
+    inner_types::InnerTypes,
+    object::{NativeArray, NativeBoolean, NativeNumber, NativeString, NativeStruct},
+    object_handle::NativeObjectHandle,
 };
-use crate::wrappers::object_handle::NativeObjectHandle;
-use serde;
-use serde::de::{DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use serde::forward_to_deserialize_any;
-use serde::Deserializer;
+use serde::{
+    self,
+    de::{DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor},
+    forward_to_deserialize_any, Deserializer,
+};
 
 pub struct NativeSerdeDeserializer<IT: InnerTypes> {
     input: NativeObjectHandle<IT>,
@@ -32,7 +33,7 @@ impl<'de, IT: InnerTypes> Deserializer<'de> for NativeSerdeDeserializer<IT> {
     where
         V: Visitor<'de>,
     {
-        if self.input.is_null() || self.input.is_undefined() {
+        if self.input.is_null()? || self.input.is_undefined()? {
             visitor.visit_unit()
         } else if let Ok(val) = self.input.to_boolean() {
             visitor.visit_bool(val.value().unwrap())
@@ -57,7 +58,7 @@ impl<'de, IT: InnerTypes> Deserializer<'de> for NativeSerdeDeserializer<IT> {
     where
         V: Visitor<'de>,
     {
-        if self.input.is_null() || self.input.is_undefined() {
+        if self.input.is_null()? || self.input.is_undefined()? {
             visitor.visit_none()
         } else {
             visitor.visit_some(self)
