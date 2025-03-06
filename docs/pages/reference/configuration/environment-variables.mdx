@@ -1063,13 +1063,10 @@ option](/reference/configuration/config#schema_path).
 
 ## `CUBEJS_SERVER_HEADERS_TIMEOUT`
 
-Limit the amount of time the parser will wait to receive the complete HTTP headers.
+The number of milliseconds to limit the amount of time the parser will wait
+to receive the complete HTTP headers.
 If the timeout expires, the server responds with status 408 without
 forwarding the request to the request listener and then closes the connection.
-
-It must be set to a non-zero value (e.g. 120 seconds) to protect against
-potential Denial-of-Service attacks in case the server is deployed without a
-reverse proxy in front.
 
 | Possible Values                           | Default in Development | Default in Production |
 | ----------------------------------------- | ---------------------- | --------------------- |
