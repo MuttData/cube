@@ -219,7 +219,7 @@ const variables: Record<string, (...args: any) => any> = {
   scheduledRefreshBatchSize: () => get('CUBEJS_SCHEDULED_REFRESH_BATCH_SIZE')
     .default('1')
     .asInt(),
-  nativeSqlPlanner: () => get('CUBEJS_TESSERACT_SQL_PLANNER').asBool(),
+  nativeSqlPlanner: () => get('CUBEJS_TESSERACT_SQL_PLANNER').default('false').asBool(),
   nativeOrchestrator: () => get('CUBEJS_TESSERACT_ORCHESTRATOR')
     .default('false')
     .asBoolStrict(),
@@ -229,6 +229,10 @@ const variables: Record<string, (...args: any) => any> = {
   transpilationWorkerThreadsCount: () => get('CUBEJS_TRANSPILATION_WORKER_THREADS_COUNT')
     .default('0')
     .asInt(),
+  // This one takes precedence over CUBEJS_TRANSPILATION_WORKER_THREADS
+  transpilationNative: () => get('CUBEJS_TRANSPILATION_NATIVE')
+    .default('false')
+    .asBoolStrict(),
 
   /** ****************************************************************
    * Common db options                                               *
@@ -1988,6 +1992,9 @@ const variables: Record<string, (...args: any) => any> = {
 
     return undefined;
   },
+  fastReload: () => get('CUBEJS_FAST_RELOAD_ENABLED')
+    .default('false')
+    .asBoolStrict(),
 };
 
 type Vars = typeof variables;

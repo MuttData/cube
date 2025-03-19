@@ -101,11 +101,43 @@ export type SQLInterfaceOptions = {
   gatewayPort?: number,
 };
 
+export interface TransformConfig {
+  fileName: string;
+  transpilers: string[];
+  compilerId: string;
+  metaData?: {
+    cubeNames: string[];
+    cubeSymbols: Record<string, Record<string, boolean>>;
+    contextSymbols: Record<string, string>;
+  }
+}
+
+export interface TransformResponse {
+  code: string;
+  errors: string[];
+  warnings: string[];
+}
+
 export type DBResponsePrimitive =
   null |
   boolean |
   number |
   string;
+
+// TODO type this better, to make it proper disjoint union
+export type Sql4SqlOk = {
+  sql: string,
+    values: Array<string | null>,
+};
+export type Sql4SqlError = { error: string };
+export type Sql4SqlCommon = {
+  query_type: {
+    regular: boolean;
+    post_processing: boolean;
+    pushdown: boolean;
+  }
+};
+export type Sql4SqlResponse = Sql4SqlCommon & (Sql4SqlOk | Sql4SqlError);
 
 let loadedNative: any = null;
 
@@ -275,7 +307,23 @@ function wrapNativeFunctionWithStream(
       if (!!response && !!response.stream) {
         response.stream.destroy(e);
       }
-      writerOrChannel.reject(errorString(e));
+
+      try {
+        writerOrChannel.reject(errorString(e));
+      } catch (rejectError) {
+        // This is async function, just for usability, it's return value is not expected anywhere
+        // Rust part does not care for returned promises, so we should take care here to avoid unhandled rejections
+        // `writerOrChannel.reject` can throw when channel is already dropped by Rust side
+        // This can happen directly, when drop happened between creating channel and calling `reject`,
+        // or indirectly, when drop happened between creating channel and calling `resolve`, resolve raised an exception
+        // that was caught here
+        // There's nothing we can do, or should do with this: there's nobody to respond to
+        if (process.env.CUBEJS_NATIVE_INTERNAL_DEBUG) {
+          console.debug('[js] writerOrChannel.reject exception', {
+            e: rejectError,
+          });
+        }
+      }
     }
   };
 }
@@ -356,6 +404,13 @@ export const execSql = async (instance: SqlInterfaceInstance, sqlQuery: string, 
   await native.execSql(instance, sqlQuery, stream, securityContext ? JSON.stringify(securityContext) : null);
 };
 
+// TODO parse result from native code
+export const sql4sql = async (instance: SqlInterfaceInstance, sqlQuery: string, disablePostProcessing: boolean, securityContext?: unknown): Promise<Sql4SqlResponse> => {
+  const native = loadNative();
+
+  return native.sql4sql(instance, sqlQuery, disablePostProcessing, securityContext ? JSON.stringify(securityContext) : null);
+};
+
 export const buildSqlAndParams = (cubeEvaluator: any): String => {
   const native = loadNative();
 
@@ -403,6 +458,16 @@ export const getFinalQueryResultMulti = (transformDataArr: Object[], rows: any[]
   const native = loadNative();
 
   return native.getFinalQueryResultMulti(transformDataArr, rows, responseData);
+};
+
+export const transpileJs = async (content: String, metadata: TransformConfig): Promise<TransformResponse> => {
+  const native = loadNative();
+
+  if (native.transpileJs) {
+    return native.transpileJs(content, metadata);
+  }
+
+  throw new Error('TranspileJs native implementation not found!');
 };
 
 export interface PyConfiguration {
